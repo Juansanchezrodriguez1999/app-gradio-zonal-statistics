@@ -1,0 +1,11 @@
+gradio_client==1.4.2
+uvicorn==0.31.0
+python-dotenv==1.0.1
+rasterio==1.4.2
+fastapi[standard]==0.115.4
+passlib[bcrypt]==1.7.4
+gradio==5.5.0
+sqlmodel==0.0.22
+shapely==2.0.6
+geopandas==1.0.1
+numpy==1.26.1

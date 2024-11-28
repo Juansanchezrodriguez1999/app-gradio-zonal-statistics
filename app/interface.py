@@ -69,6 +69,7 @@ def process_shp_data(images: List[str], shp: str) -> str:
             raise FileNotFoundError("No .shp or .dbf file found in ZIP.")
 
         gdf = gpd.read_file(shp_file)
+        first_column_name = gdf.columns[0]
         gdf.to_file(json_path, driver='GeoJSON')
 
         with open(json_path) as f:
@@ -77,7 +78,7 @@ def process_shp_data(images: List[str], shp: str) -> str:
             stats = []
             for feature in geojson_data['features']:
                 geometry = feature['geometry']
-                polygon_id = feature['properties']['objectid']
+                polygon_id = feature['properties'][first_column_name]
                 stats.append(calculate_statistics_in_polygon(geometry, images, polygon_id, indice))
             indice_dir = os.path.join(extract_path, indice)
             os.makedirs(indice_dir, exist_ok=True)
@@ -106,7 +107,7 @@ io =gr.Interface(
             gr.File(label="Upload Shapefile ZIP", type="filepath"),   
         ],
         outputs=[
-            gr.File(label="Download ZIP with Cropped Images")        ],
+            gr.File(label="Download Updated Shapefiles")        ],
         title="Zonal Statistics",
         description="Calculate the statistics (mean value and standard deviation) of a given index over selected zones. The index is marked by an image and the zones are delineated by an overlapping polygon shapefile. Upload images and an overlapping zipped shapefile to calculate the statistics. The input image nomenclature must follow the format INDEX_YYYY_MM.TIF. The output file is an updated shapefile with the statistics as columns in the attribute table. ",
         flagging_mode="never",       

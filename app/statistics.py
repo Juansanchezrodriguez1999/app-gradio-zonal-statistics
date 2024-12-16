@@ -6,14 +6,14 @@ import numpy as np
 import pandas as pd
 import os
 
-def calculate_statistics_in_polygon(gdf_parcela, image_paths, polygon_id,indice):
+def calculate_statistics_in_polygon(gdf_parcela, image_paths, polygon_id, indice):
     """
     Calculates mean and standard deviation of values within a polygon in multiple rasters and exports to CSV.
 
     Args:
         gdf_parcela (GeoDataFrame or dict): GeoDataFrame with the geometry, or a dictionary representing the parcel geometry.
         image_paths (list of str): List of paths to raster files.
-        format (str): Expected file format, e.g., 'tif' or 'jp2'.
+        polygon_id (str): Identifier for the polygon being processed.
 
     Returns:
         dict: Dictionary with mean and standard deviation for each raster for each polygon.
@@ -29,15 +29,15 @@ def calculate_statistics_in_polygon(gdf_parcela, image_paths, polygon_id,indice)
             parcela_crs = gdf_parcela.get('CRS', 'EPSG:4326')
             gdf_parcela = gpd.GeoDataFrame(geometry=[parcela_geometry], crs=parcela_crs)
 
-        valid_files = [f for f in image_paths if f.endswith(f'.tif') and (indice in f)]
+        valid_files = [f for f in image_paths if f.endswith('.tif') and (indice in f)]
         if not valid_files:
-            raise FileNotFoundError(f"No files found with the .tif format.")
-        
+            raise FileNotFoundError("No files found with the .tif format.")
+
         stats = {polygon_id: {}}
         data_for_csv = []
 
         for image_path in valid_files:
-            year_list=list(os.path.basename(image_path).split("_")[1])
+            year_list = list(os.path.basename(image_path).split("_")[1])
             month = (os.path.basename(image_path).split("_")[2]).split(".")[0]
             original_filename = f'{month}{year_list[2]}{year_list[3]}'
             with rasterio.open(image_path) as src:
@@ -48,15 +48,20 @@ def calculate_statistics_in_polygon(gdf_parcela, image_paths, polygon_id,indice)
                 geometries = [gdf_parcela.geometry.iloc[0]]
                 out_image, out_transform = mask(src, geometries, crop=False)
 
+                # Calcular estadísticas solo si hay datos válidos
+                if np.isnan(out_image).all():
+                    print(f"No data found in masked area for image {image_path}. Skipping.")
+                    continue
+
                 mean_val = np.nanmean(out_image)
                 median_val = np.nanmedian(out_image)
                 std_dev_val = np.nanstd(out_image)
-                
+
                 # Guardar datos en el diccionario de estadísticas por imagen
                 stats[polygon_id][f'{original_filename}_mean'] = mean_val
                 stats[polygon_id][f'{original_filename}_medi'] = median_val
                 stats[polygon_id][f'{original_filename}_std'] = std_dev_val
-                
+
                 # Añadir datos al DataFrame de CSV
                 data_for_csv.append({
                     "polygon_id": polygon_id,

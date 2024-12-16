@@ -59,11 +59,6 @@ def on_startup():
 
 @app.get("/json", response_model=dict)
 def new_user(request: Request, api_key: str = Depends(query_scheme)) -> dict:
-    print("Prueba empezada")
-    print(api_key)
-    print(X_API_KEY)
-    print(api_key==X_API_KEY)
-    print("Prueba acabada")
     if api_key != X_API_KEY:
         raise HTTPException(status_code=401, detail="Not authorized")
 

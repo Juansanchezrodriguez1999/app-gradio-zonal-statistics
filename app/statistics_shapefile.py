@@ -29,7 +29,11 @@ def calculate_statistics_in_polygon(gdf_parcela, image_paths, polygon_id,indice)
             parcela_crs = gdf_parcela.get('CRS', 'EPSG:4326')
             gdf_parcela = gpd.GeoDataFrame(geometry=[parcela_geometry], crs=parcela_crs)
 
+        print("imagenes antes de validas")
+        print(image_paths)
         valid_files = [f for f in image_paths if f.endswith(f'.tif') and (indice in f)]
+        print("imagenes validas")
+        print(valid_files)
         if not valid_files:
             raise FileNotFoundError(f"No files found with the .tif format.")
         

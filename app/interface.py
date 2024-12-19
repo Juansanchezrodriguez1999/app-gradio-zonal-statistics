@@ -26,6 +26,7 @@ from app.get_tiles import get_tiles_polygons
 from app.generate_map import generate_map_from_geojson
 import geopandas as gpd
 from shapely.geometry import shape
+from gradio_calendar import Calendar
 
 import folium
 
@@ -37,7 +38,7 @@ zoom_start = 7  # Nivel de zoom inicial
 # Crear el mapa
 initial_map = folium.Map(location=[lat, lon], zoom_start=zoom_start, tiles="OpenStreetMap")
 
-def create_zip(file_paths: List[str]) -> str:
+'''def create_zip(file_paths: List[str]) -> str:
     """
     Creates a ZIP file containing the provided image files.
 
@@ -95,7 +96,7 @@ def process_sigpac_data(province: int, municipality: int, polygon: int, parcel: 
     except FileNotFoundError as e:
         raise FileNotFoundError(f"File not found: {str(e)}")
     except Exception as e:
-        raise Exception(f"An error occurred: {str(e)}")
+        raise Exception(f"An error occurred: {str(e)}")'''
 
 def process_catastral_data(catastral_registry: int, images: List[str]) -> Tuple[str, str]:
     """
@@ -109,7 +110,10 @@ def process_catastral_data(catastral_registry: int, images: List[str]) -> Tuple[
     Returns:
         Tuple[str, str]: Paths to the ZIP file containing cropped images and the GeoJSON file with geometry.
     """
-    format="tif"
+    unique_formats = list(set(f.split('.')[-1].lower() for f in images if isinstance(f, str) and '.' in f))
+    if len(unique_formats) > 1:
+        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
+
     try:
         geometry, metadata = find_from_cadastral_registry(catastral_registry)
         geojson_data = {
@@ -130,7 +134,7 @@ def process_catastral_data(catastral_registry: int, images: List[str]) -> Tuple[
         with open(geojson_path, "w") as geojson_file:
             json.dump(geojson_data, geojson_file)
 
-        images_dir = cut_from_geometry(geometry, format, images)
+        images_dir = cut_from_geometry(geometry, unique_formats[0], images)
         indices = list({file.split('/')[-1].split('_')[0].strip() for file in images_dir})
         for indice in indices:
             stats_index = {}
@@ -184,7 +188,7 @@ def process_catastral_data(catastral_registry: int, images: List[str]) -> Tuple[
                 if feature["objectID"] in convinced_dict:
                     feature["zonalStatistics"] = convinced_dict[feature["objectID"]]
 
-            updated_file_name = f'updated_geojson_{indice}.geojson'
+            updated_file_name = f'Geojson_actualizado_{indice}.geojson'
             with open(updated_file_name, 'w') as file:
                 json.dump(geojson_data, file, indent=4)
             total_geojson_files.append(updated_file_name)
@@ -192,14 +196,14 @@ def process_catastral_data(catastral_registry: int, images: List[str]) -> Tuple[
         unique_polygons = combined_df["polygon_id"].unique()
         for polygon in unique_polygons:
             df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-            total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))     
+            total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))     
 
-        zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'updated_geojson.zip')
+        zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'Geojson_actualizado.zip')
         with zipfile.ZipFile(zip_output_geojson, 'w') as zipf:
             for geojson_file in total_geojson_files:
                 zipf.write(geojson_file, os.path.basename(geojson_file))
 
-        zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+        zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
         with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
             for html_file in total_html_files:
                 zipf.write(html_file, os.path.basename(html_file))
@@ -209,7 +213,7 @@ def process_catastral_data(catastral_registry: int, images: List[str]) -> Tuple[
     except Exception as e:
         raise Exception(f"An error occurred: {str(e)}")
     
-def process_catastral_data_sentinel(catastral_registry: int, years: list, months: list, indexes: list) -> str:
+def process_catastral_data_sentinel(catastral_registry: int, indexes: list, date_start: str, date_end:str) -> str:
     """
     Processes images by cutting them according to SIGPAC geometry and returns a ZIP file with cropped images and geometry in GeoJSON format.
 
@@ -221,13 +225,18 @@ def process_catastral_data_sentinel(catastral_registry: int, years: list, months
     Returns:
         Tuple[str, str]: Paths to the ZIP file containing cropped images and the GeoJSON file with geometry.
     """
+    year_start = date_start.strftime("%Y")
+    month_start = date_start.strftime("%B")
+    year_end = date_end.strftime("%Y")
+    month_end = date_end.strftime("%B")
+    years = [year_start,year_end]
+    months = [month_start,month_end]
+    indexes = [indexes.upper()]    
     total_html_files = []
     total_geojson_files = []
     combined_df = pd.DataFrame()  
     temporal_df = pd.DataFrame()  
 
-    format="tif"
-    indexes = [x.upper() for x in indexes]  
     geometry, metadata = find_from_cadastral_registry(catastral_registry)
     geojson_data = {
         "type": "FeatureCollection",
@@ -250,9 +259,13 @@ def process_catastral_data_sentinel(catastral_registry: int, years: list, months
     zones_utm = get_tiles_polygons(gdf)
     list_zones_utm = list(zones_utm)
     images_dir = download_tif_files(list_zones_utm, years, indexes, months) 
+    unique_formats = list(set(f.split('.')[-1].lower() for f in images_dir if isinstance(f, str) and '.' in f))
+    if len(unique_formats) > 1:
+        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
+
     main_map = generate_map_from_geojson(geojson_data)
         
-    cropped_images = cut_from_geometry(geometry,format,images_dir)
+    cropped_images = cut_from_geometry(geometry,unique_formats[0],images_dir)
 
     for indice in indexes:
         stats_index = {}
@@ -307,7 +320,7 @@ def process_catastral_data_sentinel(catastral_registry: int, years: list, months
             if feature["objectID"] in convinced_dict:
                 feature["zonalStatistics"] = convinced_dict[feature["objectID"]]
 
-        updated_file_name = f'updated_geojson_{indice}.geojson'
+        updated_file_name = f'Geojson_actualizado_{indice}.geojson'
         with open(updated_file_name, 'w') as file:
             json.dump(geojson_data, file, indent=4)
         total_geojson_files.append(updated_file_name)
@@ -315,21 +328,21 @@ def process_catastral_data_sentinel(catastral_registry: int, years: list, months
     unique_polygons = combined_df["polygon_id"].unique()
     for polygon in unique_polygons:
         df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-        total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))     
+        total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))     
 
-    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'updated_geojson.zip')
+    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'Geojson_actualizado.zip')
     with zipfile.ZipFile(zip_output_geojson, 'w') as zipf:
         for geojson_file in total_geojson_files:
             zipf.write(geojson_file, os.path.basename(geojson_file))
 
-    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
     with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
         for html_file in total_html_files:
             zipf.write(html_file, os.path.basename(html_file))
     
-    return zip_output_geojson, zip_output_plots, main_map._repr_html_()
+    return zip_output_plots, zip_output_geojson, main_map._repr_html_()
 
-def process_geojson_data(images: List[str], geojson: str) -> str:
+def process_geojson_data(geojson: str, images: List[str]) -> str:
     """
     Processes images by cutting them according to the provided GeoJSON geometry and returns a ZIP file with cropped images.
 
@@ -341,8 +354,10 @@ def process_geojson_data(images: List[str], geojson: str) -> str:
     Returns:
         str: Path to the ZIP file containing the cropped images.
     """
-    format = "tif"
     indices = set()
+    unique_formats = list(set(f.split('.')[-1].lower() for f in images if isinstance(f, str) and '.' in f))
+    if len(unique_formats) > 1:
+        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
 
     total_html_files = []
     total_geojson_files = []
@@ -365,7 +380,7 @@ def process_geojson_data(images: List[str], geojson: str) -> str:
                 geometry = feature['geometry']
                 polygon_id = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
                 feature['objectID'] = polygon_id
-                images_dir = cut_from_geometry(geometry, format, images)
+                images_dir = cut_from_geometry(geometry, unique_formats[0], images)
                 stats.append(calculate_statistics_in_polygon(geometry, images_dir, polygon_id, indice))
             
             stats_index[indice] = stats
@@ -411,7 +426,7 @@ def process_geojson_data(images: List[str], geojson: str) -> str:
                 if feature["objectID"] in convinced_dict:
                     feature["zonalStatistics"] = convinced_dict[feature["objectID"]]
 
-            updated_file_name = f'updated_geojson_{indice}.geojson'
+            updated_file_name = f'Geojson_actualizado_{indice}.geojson'
             with open(updated_file_name, 'w') as file:
                 json.dump(geojson_data, file, indent=4)
             total_geojson_files.append(updated_file_name)
@@ -419,14 +434,14 @@ def process_geojson_data(images: List[str], geojson: str) -> str:
         unique_polygons = combined_df["polygon_id"].unique()
         for polygon in unique_polygons:
             df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-            total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))     
+            total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))     
 
-        zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'updated_geojson.zip')
+        zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'Geojson_actualizado.zip')
         with zipfile.ZipFile(zip_output_geojson, 'w') as zipf:
             for geojson_file in total_geojson_files:
                 zipf.write(geojson_file, os.path.basename(geojson_file))
 
-        zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+        zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
         with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
             for html_file in total_html_files:
                 zipf.write(html_file, os.path.basename(html_file))
@@ -436,7 +451,7 @@ def process_geojson_data(images: List[str], geojson: str) -> str:
     except Exception as e:
         raise Exception(f"An error occurred: {str(e)}")
 
-def process_geojson_data_sentinel(geojson: dict, years: list, months: list, indexes: list) -> str:
+def process_geojson_data_sentinel(geojson: dict, indexes: list, date_start: str, date_end:str) -> str:
     """
     Processes images based on GeoJSON and returns a ZIP file with cropped images.
 
@@ -449,13 +464,18 @@ def process_geojson_data_sentinel(geojson: dict, years: list, months: list, inde
     Returns:
         str: Path to the ZIP file with cropped images.
     """
-    format = "tif"
+    year_start = date_start.strftime("%Y")
+    month_start = date_start.strftime("%B")
+    year_end = date_end.strftime("%Y")
+    month_end = date_end.strftime("%B")
+    years = [year_start,year_end]
+    months = [month_start,month_end]
+    indexes = [indexes.upper()]    
     total_html_files = []
+    
     total_geojson_files = []
     combined_df = pd.DataFrame()  
     temporal_df = pd.DataFrame() 
-
-    indexes = [x.upper() for x in indexes]  
     gdf = gpd.read_file(geojson)
     json_path = os.path.join(tempfile.gettempdir(), 'temp_shapefile.json')
     gdf.to_file(json_path, driver='GeoJSON')
@@ -464,10 +484,14 @@ def process_geojson_data_sentinel(geojson: dict, years: list, months: list, inde
     zones_utm = get_tiles_polygons(gdf)
     list_zones_utm = list(zones_utm)
     images_dir = download_tif_files(list_zones_utm, years, indexes, months) 
+    unique_formats = list(set(f.split('.')[-1].lower() for f in images_dir if isinstance(f, str) and '.' in f))
+    if len(unique_formats) > 1:
+        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
+
     main_map = generate_map_from_geojson(geojson_data)
     geometry= geojson_data['features'][0]['geometry']
 
-    cropped_images = cut_from_geometry(geometry,format,images_dir)
+    cropped_images = cut_from_geometry(geometry,unique_formats[0],images_dir)
 
     for indice in indexes:
         stats_index = {}
@@ -522,7 +546,7 @@ def process_geojson_data_sentinel(geojson: dict, years: list, months: list, inde
             if feature["objectID"] in convinced_dict:
                 feature["zonalStatistics"] = convinced_dict[feature["objectID"]]
 
-        updated_file_name = f'updated_geojson_{indice}.geojson'
+        updated_file_name = f'Geojson_actualizado_{indice}.geojson'
         with open(updated_file_name, 'w') as file:
             json.dump(geojson_data, file, indent=4)
         total_geojson_files.append(updated_file_name)
@@ -530,14 +554,14 @@ def process_geojson_data_sentinel(geojson: dict, years: list, months: list, inde
     unique_polygons = combined_df["polygon_id"].unique()
     for polygon in unique_polygons:
         df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-        total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))     
+        total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))     
 
-    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'updated_geojson.zip')
+    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'Geojson_actualizado.zip')
     with zipfile.ZipFile(zip_output_geojson, 'w') as zipf:
         for geojson_file in total_geojson_files:
             zipf.write(geojson_file, os.path.basename(geojson_file))
 
-    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
     with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
         for html_file in total_html_files:
             zipf.write(html_file, os.path.basename(html_file))
@@ -567,7 +591,7 @@ def add_stats_to_dbf(dbf_path: str, stats: list, indice: str, output_dir: str) -
     gdf.to_csv(csv_path, index=False)
     return updated_dbf_path, csv_path
 
-def process_shp_data(images: List[str],shp: str ) -> str:
+def process_shp_data(shp: str,images: List[str] ) -> str:
     """
     Processes images by cutting them according to the provided shapefile geometry and returns a ZIP file with cropped images.
 
@@ -579,8 +603,11 @@ def process_shp_data(images: List[str],shp: str ) -> str:
     Returns:
         str: Path to the ZIP file containing the cropped images.
     """
+    print("imagenbes cargadas")
+
+    print(images)
     extract_path = './temp_extracted_files'
-    output_zip_path = os.path.join(tempfile.gettempdir(), 'updated_shapefile.zip')
+    output_zip_path = os.path.join(tempfile.gettempdir(), 'Shapefile_actualizado.zip')
     updated_shapefiles_path = tempfile.mkdtemp()  
     total_html_files = []
     total_geojson_files = []
@@ -588,7 +615,6 @@ def process_shp_data(images: List[str],shp: str ) -> str:
     temporal_df = pd.DataFrame() 
     json_path = './temp_shapefile.json'
     indices = set()
-    format = "tif"
     for image in images:
         match = re.match(r"(\w+)_\d{4}_\d{2}\.tif", os.path.basename(image))
         if match:
@@ -623,7 +649,13 @@ def process_shp_data(images: List[str],shp: str ) -> str:
                 for feature in geojson_data['features']:
                     geometry = feature['geometry']
                     polygon_id = feature['properties'][first_column_name]
-                    images_dir = cut_from_geometry(geometry, format, images)
+                    unique_formats = list(set(f.split('.')[-1].lower() for f in images if isinstance(f, str) and '.' in f))
+                    if len(unique_formats) > 1:
+                        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
+
+                    images_dir = cut_from_geometry(geometry, unique_formats[0], images)
+                    print("despues de cortee")
+                    print(images_dir)
                     stats.append(calculate_statistics_in_polygon(geometry, images_dir, polygon_id, indice))
                 indice_dir = os.path.join(extract_path, indice)
                 os.makedirs(indice_dir, exist_ok=True)
@@ -664,8 +696,8 @@ def process_shp_data(images: List[str],shp: str ) -> str:
             unique_polygons = combined_df["polygon_id"].unique()
             for polygon in unique_polygons:
                 df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-                total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))
-            zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+                total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))
+            zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
             with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
                 for html_file in total_html_files:
                     zipf.write(html_file, os.path.basename(html_file))
@@ -687,7 +719,7 @@ def process_shp_data(images: List[str],shp: str ) -> str:
     except Exception as e:
         raise Exception(f"An error occurred: {str(e)}")
     
-def process_shp_data_sentinel(shp: str, years: list, months: list, indexes: list) -> str:
+def process_shp_data_sentinel(shp: str, indexes: list, date_start: str, date_end:str) -> str:
     """
     Processes images by cutting them according to the provided shapefile geometry and returns a ZIP file with cropped images.
 
@@ -699,9 +731,15 @@ def process_shp_data_sentinel(shp: str, years: list, months: list, indexes: list
     Returns:
         str: Path to the ZIP file containing the cropped images.
     """
-    format="tif"
+    year_start = date_start.strftime("%Y")
+    month_start = date_start.strftime("%B")
+    year_end = date_end.strftime("%Y")
+    month_end = date_end.strftime("%B")
+    years = [year_start,year_end]
+    months = [month_start,month_end]
+    indexes = [indexes.upper()]    
     extract_path = tempfile.mkdtemp()
-    output_zip_path = os.path.join(tempfile.gettempdir(), 'updated_shapefiles.zip')
+    output_zip_path = os.path.join(tempfile.gettempdir(), 'Shapefile_actualizado.zip')
     updated_shapefiles_path = tempfile.mkdtemp()  
     total_html_files = []
     total_geojson_files = []
@@ -721,7 +759,6 @@ def process_shp_data_sentinel(shp: str, years: list, months: list, indexes: list
         raise FileNotFoundError("No .shp or .dbf file found in ZIP.")
     
     gdf = gpd.read_file(shp_file)
-    indexes = [x.upper() for x in indexes]  
     gdf = gpd.read_file(shp_file)
     json_path = os.path.join(tempfile.gettempdir(), 'temp_shapefile.json')
     gdf.to_file(json_path, driver='GeoJSON')
@@ -731,6 +768,10 @@ def process_shp_data_sentinel(shp: str, years: list, months: list, indexes: list
     zones_utm = get_tiles_polygons(gdf)
     list_zones_utm = list(zones_utm)
     images_dir = download_tif_files(list_zones_utm, years, indexes, months) 
+    unique_formats = list(set(f.split('.')[-1].lower() for f in images_dir if isinstance(f, str) and '.' in f))
+    if len(unique_formats) > 1:
+        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
+
 
     for indice in indexes:
         stats = []
@@ -777,8 +818,8 @@ def process_shp_data_sentinel(shp: str, years: list, months: list, indexes: list
     unique_polygons = combined_df["polygon_id"].unique()
     for polygon in unique_polygons:
         df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-        total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))
-    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+        total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))
+    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
     with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
         for html_file in total_html_files:
             zipf.write(html_file, os.path.basename(html_file))
@@ -793,7 +834,7 @@ def process_shp_data_sentinel(shp: str, years: list, months: list, indexes: list
     
     return output_zip_path,zip_output_plots,main_map._repr_html_()
     
-def process_csv_data(csv: str, images: List[str]) -> str:
+def process_csv_data(csv: str, images: List[str], latitude_column:str, longitude_column:str) -> str:
     """
     Processes images by cutting them according to the provided shapefile geometry and returns a ZIP file with cropped images.
 
@@ -806,7 +847,10 @@ def process_csv_data(csv: str, images: List[str]) -> str:
         str: Path to the ZIP file containing the cropped images.
     """    
     df = pd.read_csv(csv)
-    format="tif"
+    unique_formats = list(set(f.split('.')[-1].lower() for f in images if isinstance(f, str) and '.' in f))
+    if len(unique_formats) > 1:
+        raise ValueError(f"Unsupported format. You must upload images in one unique format.")
+
     coordinates = df[['Y', 'X']].values.tolist()
     coordinates.append(coordinates[0])
     geojson_data = {
@@ -830,7 +874,7 @@ def process_csv_data(csv: str, images: List[str]) -> str:
     with open(geojson_path, "w") as geojson_file:
         json.dump(geojson_data, geojson_file)
     geometry= geojson_data['features'][0]['geometry']
-    images_dir = cut_from_geometry(geometry, format, images)
+    images_dir = cut_from_geometry(geometry, unique_formats[0], images)
     indices = list({file.split('/')[-1].split('_')[0].strip() for file in images_dir})
     for indice in indices:
         stats_index = {}
@@ -885,7 +929,7 @@ def process_csv_data(csv: str, images: List[str]) -> str:
             if feature["objectID"] in convinced_dict:
                 feature["zonalStatistics"] = convinced_dict[feature["objectID"]]
 
-        updated_file_name = f'updated_geojson_{indice}.geojson'
+        updated_file_name = f'Geojson_actualizado_{indice}.geojson'
         with open(updated_file_name, 'w') as file:
             json.dump(geojson_data, file, indent=4)
         total_geojson_files.append(updated_file_name)
@@ -893,20 +937,20 @@ def process_csv_data(csv: str, images: List[str]) -> str:
     unique_polygons = combined_df["polygon_id"].unique()
     for polygon in unique_polygons:
         df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-        total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))     
+        total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))     
 
-    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'updated_geojson.zip')
+    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'Geojson_actualizado.zip')
     with zipfile.ZipFile(zip_output_geojson, 'w') as zipf:
         for geojson_file in total_geojson_files:
             zipf.write(geojson_file, os.path.basename(geojson_file))
 
-    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
     with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
         for html_file in total_html_files:
             zipf.write(html_file, os.path.basename(html_file))
     return zip_output_plots,zip_output_geojson
 
-def process_csv_data_sentinel(csv: str, years: list, months: list, indexes: list) -> str:
+def process_csv_data_sentinel(csv: str, indexes: list, date_start: str, date_end:str, latitude_column:str, longitude_column:str) -> str:
     """
     Processes images by cutting them according to the provided shapefile geometry and returns a ZIP file with cropped images.
 
@@ -918,6 +962,13 @@ def process_csv_data_sentinel(csv: str, years: list, months: list, indexes: list
     Returns:
         str: Path to the ZIP file containing the cropped images.
     """
+    year_start = date_start.strftime("%Y")
+    month_start = date_start.strftime("%B")
+    year_end = date_end.strftime("%Y")
+    month_end = date_end.strftime("%B")
+    years = [year_start,year_end]
+    months = [month_start,month_end]
+    indexes = [indexes.upper()]    
     format="tif"
     indexes = [x.upper() for x in indexes]  
     total_html_files = []
@@ -1011,7 +1062,7 @@ def process_csv_data_sentinel(csv: str, years: list, months: list, indexes: list
             if feature["objectID"] in convinced_dict:
                 feature["zonalStatistics"] = convinced_dict[feature["objectID"]]
 
-        updated_file_name = f'updated_geojson_{indice}.geojson'
+        updated_file_name = f'Geojson_actualizado_{indice}.geojson'
         with open(updated_file_name, 'w') as file:
             json.dump(geojson_data, file, indent=4)
         total_geojson_files.append(updated_file_name)
@@ -1019,20 +1070,21 @@ def process_csv_data_sentinel(csv: str, years: list, months: list, indexes: list
     unique_polygons = combined_df["polygon_id"].unique()
     for polygon in unique_polygons:
         df_polygon = combined_df[combined_df["polygon_id"] == polygon].drop(columns=["polygon_id"])
-        total_html_files.extend(plot_statistics(df_polygon, ["total"], polygon))     
+        total_html_files.extend(plot_statistics(df_polygon, ["zonal"], polygon))     
 
-    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'updated_geojson.zip')
+    zip_output_geojson = os.path.join(tempfile.mkdtemp(), 'Geojson_actualizado.zip')
     with zipfile.ZipFile(zip_output_geojson, 'w') as zipf:
         for geojson_file in total_geojson_files:
             zipf.write(geojson_file, os.path.basename(geojson_file))
 
-    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'generated_plots.zip')
+    zip_output_plots = os.path.join(tempfile.mkdtemp(), 'Gráficos.zip')
     with zipfile.ZipFile(zip_output_plots, 'w') as zipf:
         for html_file in total_html_files:
             zipf.write(html_file, os.path.basename(html_file))
     
     return zip_output_geojson, zip_output_plots, main_map._repr_html_()
 
+'''OLD FUNCTIONS
 def geojson_interface() -> gr.Interface:
     """
     Creates the Gradio interface for processing images using a GeoJSON file.
@@ -1066,9 +1118,11 @@ def geojson_interface_sentinel() -> gr.Interface:
         fn=process_geojson_data_sentinel,
        inputs=[
             gr.File(label="Geojson"),
-            gr.CheckboxGroup(label="Years", choices=[2018, 2019, 2020, 2021, 2022, 2023, 2024]),
-            gr.CheckboxGroup(label="Months", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
             gr.CheckboxGroup(label="Indexes", choices=['moisture', 'ndvi', 'ndwi', 'ndsi', 'evi', 'osavi', 'evi2', 'ndre', 'ndyi', 'mndwi', 'bri', 'ri', 'bsi', 'cril']),
+            gr.Radio(label="Start Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="Start Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
+            gr.Radio(label="End Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="End Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
 
         ],
         outputs=[gr.File(label="Download Updated geometry"),
@@ -1114,9 +1168,11 @@ def shapefile_interface_sentinel() -> gr.Interface:
         fn=process_shp_data_sentinel,
         inputs=[
             gr.File(label="Shapefile"),
-            gr.CheckboxGroup(label="Years", choices=[2018, 2019, 2020, 2021, 2022, 2023, 2024]),
-            gr.CheckboxGroup(label="Months", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
             gr.CheckboxGroup(label="Indexes", choices=['moisture', 'ndvi', 'ndwi', 'ndsi', 'evi', 'osavi', 'evi2', 'ndre', 'ndyi', 'mndwi', 'bri', 'ri', 'bsi', 'cril']),
+            gr.Radio(label="Start Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="Start Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
+            gr.Radio(label="End Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="End Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
 
         ],
         outputs=[gr.File(label="Download Updated Shapefile"),
@@ -1194,9 +1250,11 @@ def catastral_interface_sentinel() -> gr.Interface:
         fn=process_catastral_data_sentinel,
         inputs=[
             gr.Text(label="Catastral Registry", value="41055A010000110003JL"),
-            gr.CheckboxGroup(label="Years", choices=[2018, 2019, 2020, 2021, 2022, 2023, 2024]),
-            gr.CheckboxGroup(label="Months", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
             gr.CheckboxGroup(label="Indexes", choices=['moisture', 'ndvi', 'ndwi', 'ndsi', 'evi', 'osavi', 'evi2', 'ndre', 'ndyi', 'mndwi', 'bri', 'ri', 'bsi', 'cril']),
+            gr.Radio(label="Start Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="Start Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
+            gr.Radio(label="End Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="End Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
 
         ],
         outputs=[gr.File(label="Download Updated geometry"),
@@ -1258,10 +1316,11 @@ def csv_interface_sentinel() -> gr.Interface:
         fn=process_csv_data_sentinel,
         inputs=[
             gr.File(label="CSV"),
-            gr.CheckboxGroup(label="Years", choices=[2018, 2019, 2020, 2021, 2022, 2023, 2024]),
-            gr.CheckboxGroup(label="Months", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
             gr.CheckboxGroup(label="Indexes", choices=['moisture', 'ndvi', 'ndwi', 'ndsi', 'evi', 'osavi', 'evi2', 'ndre', 'ndyi', 'mndwi', 'bri', 'ri', 'bsi', 'cril']),
-
+            gr.Radio(label="Start Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="Start Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
+            gr.Radio(label="End Year", choices=[2017,2018, 2019, 2020, 2021, 2022, 2023, 2024]),
+            gr.Radio(label="End Month", choices=["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"]),
         ],
         outputs=[gr.File(label="Download Updated geometry"),
                  gr.File(label="Download Zonal Statistics Plots"),
@@ -1297,6 +1356,8 @@ def build_interface() -> gr.Blocks:
         gr.Blocks: The complete Gradio interface with tabs.
     """
     with gr.Blocks(theme="soft") as interface:
+        gr.Markdown("# Zonal Statistics")
+        gr.Markdown("Zonal statistics general description")
         with gr.Tab("Catastral Registry User"):
             catastral_interface()
         with gr.Tab("Catastral Registry S-2"):
@@ -1305,8 +1366,8 @@ def build_interface() -> gr.Blocks:
             shapefile_interface()
         with gr.Tab("Shapefile S-2"):
             shapefile_interface_sentinel()
-        '''with gr.Tab("SIGPAC"):
-            sigpac_interface()'''
+        with gr.Tab("SIGPAC"):
+            sigpac_interface()
         with gr.Tab("CSV User"):
             csv_interface()
         with gr.Tab("CSV S-2"):
@@ -1316,6 +1377,279 @@ def build_interface() -> gr.Blocks:
         with gr.Tab("GeoJSON S-2"):
             geojson_interface_sentinel()
         
+    return interface
+
+io = build_interface()'''
+
+def build_interface() -> gr.Blocks:
+    """
+    Builds the Gradio interface with separate tabs for SIGPAC and GeoJSON image processing.
+
+    Returns:
+        gr.Blocks: The complete Gradio interface with tabs.
+    """
+    with gr.Blocks(theme="soft") as interface:  
+        gr.Markdown("""# Recorte de imágenes
+        Esta herramienta sirve para el cálculo de las estadisticas zonales de imágenes satélite. El cálculo se hace sobre la zona de la imágen que está dentro de la geometría proporcionada. 
+        Esta herramienta pretende calcular las estadísticas zonales de las imágenes de un sensor específico (satélite, avión, dron) tomadas en un corto periodo de tiempo para obtener unas gráficas y una geometría actualizada con los valores estadísticos.
+        Puedes elegir entre hacer las estadícticas de tus propias imágenes o directamente obtener las estadísticas de imágenes de archivo procedentes de capturas de Sentinel-2 indicando la zona deseada y el índice espectral.
+        ### Selecciona imágenes fuente de imagen:
+        """)
+        with gr.Tab("Imágenes propias"):
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("""
+                    ### Detalles de los inputs                
+                    - **Imágenes**: Imágenes que el usuario desea recortar.
+                    - **Tipo de geometría**: Indica cual es el archivo de geometría que se va a utilizar.
+                    - **Archivo de geometría**: Archivo que contiene la geometría deseada.
+                        - **Si seleccionas un archivo CSV**:
+                            El archivo CSV debe contener 3 o más puntos de coordenada (lat/lon) para definir una geometría.  
+                            En el CSV de ejemplo encontramos estas columnas:
+                            - **Vertex**: Índice de fila (no necesario).
+                            - **X**: Latitud (coordenadas geográficas).
+                            - **Y**: Longitud (coordenadas geográficas).
+                            ```csv
+                            Vertex,X,Y
+                            1,37.66314226,-5.302012025
+                            2,37.66634019,-5.22130994
+                            3,37.72700059,-5.246265025
+                            4,37.72265957,-5.334305567
+                            ```                    
+                    - **Columna latitud**: Nombre de la columna de latitud en el csv.
+                    - **Columna longitud**: Nombre de la columna de longitud en el csv.
+                    - **Registro catastral**: Codigo catastral de la zona.
+                    ### Detalles de los outputs                
+                    - **Gráficos**: Gráficos con las estadísticas zonales de las imágenes y geometrías seleccionadas.
+                    - **Geometría**: Geometría actualizada con los datos de las estadísticas zonales.
+                    """)
+
+                with gr.Column():
+                    imagenes= gr.File(label="Subir imágenes", file_count="multiple", type="filepath")
+                    input_file_type = gr.Radio(
+                        label="Selecciona la geometría", 
+                        choices=['Shapefile', 'CSV', 'Geojson', 'Registro Catastral']
+                    )
+                    geometry_file = gr.File(label="Sube archivo de geometría", visible=True)
+
+                    latitude_column = gr.Text(label="Inserte el nombre de la columna de la latitud", value="X", visible=False)
+
+                    longitude_column = gr.Text(label="Inserte el nombre de la columna de la longitud", value="Y", visible=False)
+
+                    catastral_registry = gr.Text(label="Inserte código de registro catastral", value="41055A010000110003JL", visible=False)
+                
+            with gr.Row(): 
+                submit_button = gr.Button(value="Procesar")  
+                clear_button = gr.Button(value="Limpiar") 
+            with gr.Row(): 
+                output_plots = gr.File(label="Descargar gráficas")
+                output_geometry = gr.File(label="Descargar geometría")
+            def clear_inputs():
+                """
+                Resetea todos los campos del formulario a sus valores iniciales.
+                """
+                return (
+                    gr.update(value=None),
+                    gr.update(value=None),  
+                    gr.update(value=None),  
+                    gr.update(value=""),    
+                    gr.update(value=""),    
+                    gr.update(value=""),    
+                    gr.update(value=None),  
+                )
+            clear_button.click(
+                fn=clear_inputs,
+                inputs=[],
+                outputs=[
+                    imagenes,              
+                    input_file_type,        
+                    geometry_file,         
+                    latitude_column,    
+                    longitude_column,       
+                    catastral_registry,    
+                ]
+            )
+            def update_visibility(file_type):
+                if file_type == "Registro Catastral":
+                    return (
+                        gr.update(visible=False),  
+                        gr.update(visible=True),   
+                        gr.update(visible=False),  
+                        gr.update(visible=False)   
+                    )
+                elif file_type == "CSV":
+                    return (
+                        gr.update(visible=True),   
+                        gr.update(visible=False), 
+                        gr.update(visible=True),   
+                        gr.update(visible=True)    
+                    )
+                else:
+                    return (
+                        gr.update(visible=True),   
+                        gr.update(visible=False),  
+                        gr.update(visible=False), 
+                        gr.update(visible=False)  
+                    )
+
+            def process_inputs(imagenes,input_file_type, geometry_file, catastral_registry, latitude_column, longitude_column):
+                if input_file_type == "Registro Catastral":
+                    return process_catastral_data(catastral_registry, imagenes)
+                elif input_file_type == "Shapefile":
+                    return process_shp_data(geometry_file, imagenes )
+                elif input_file_type == "CSV":
+                    return process_csv_data(geometry_file, imagenes, latitude_column, longitude_column)
+                else:
+                    return process_geojson_data(geometry_file, imagenes)
+
+            input_file_type.change(
+                fn=update_visibility,
+                inputs=[input_file_type],
+                outputs=[geometry_file, catastral_registry, latitude_column, longitude_column]
+            )
+
+            submit_button.click(
+                fn=process_inputs,
+                inputs=[imagenes, input_file_type, geometry_file, catastral_registry, latitude_column, longitude_column],
+                outputs=[output_plots,output_geometry]
+            )
+    
+        with gr.Tab("Imágenes de archivo"):
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("""
+                    ### Detalles de los inputs                
+                    - **Índice**: Índice espectral.
+                    - **Tipo de geometría**: Indica cual es el archivo de geometría que se va a utilizar.
+                        - **Archivo de geometría**: Archivo que contiene la geometría deseada.
+                        - **Si seleccionas un archivo CSV**:
+                            El archivo CSV debe contener 3 o más puntos de coordenada (lat/lon) para definir una geometría.  
+                            En el CSV de ejemplo encontramos estas columnas:
+                            - **Vertex**: Índice de fila (no necesario).
+                            - **X**: Latitud (coordenadas geográficas).
+                            - **Y**: Longitud (coordenadas geográficas).
+                            ```csv
+                            Vertex,X,Y
+                            1,37.66314226,-5.302012025
+                            2,37.66634019,-5.22130994
+                            3,37.72700059,-5.246265025
+                            4,37.72265957,-5.334305567
+                            ```    
+                    - **Columna latitud**: Nombre de la columna de latitud en el csv.
+                    - **Columna longitud**: Nombre de la columna de longitud en el csv.
+                    - **Registro catastral**: Codigo catastral de la zona.
+                    - **Fecha**: Fecha de la imágen (Los satélites no pasan todos los días por lo que se buscará la fecha más cercana a la indicada).
+                    ### Detalles de los outputs                
+                    - **Gráficos**: Gráficos con las estadísticas zonales de las imágenes y geometrías seleccionadas.
+                    - **Geometría**: Geometría actualizada con los datos de las estadísticas zonales.
+                    - **Mapa**: Mapa con la geometría recortada.
+                    """)
+
+                with gr.Column():
+                    indexes = gr.Radio(
+                        label="Selecciona el índice", 
+                        choices=['moisture', 'ndvi', 'ndwi', 'ndsi', 'evi', 'osavi', 'evi2', 'ndre', 'ndyi', 'mndwi', 'bri', 'ri', 'bsi', 'cril']
+                    )
+                    input_file_type = gr.Radio(
+                        label="Selecciona la geometría", 
+                        choices=['Shapefile', 'CSV', 'Geojson', 'Registro Catastral']
+                    )
+                    geometry_file = gr.File(label="Sube archivo de geometría", visible=True)
+                    latitude_column = gr.Text(label="Inserte el nombre de la columna de la latitud", value="X", visible=False)
+
+                    longitude_column = gr.Text(label="Inserte el nombre de la columna de la longitud", value="Y", visible=False)
+
+
+                    catastral_registry = gr.Text(label="Inserte código de registro catastral", value="41055A010000110003JL", visible=False)
+
+                    selected_date_start = Calendar(type="date", label="Seleccionar fecha inicial")
+                    selected_date_end = Calendar(type="date", label="Seleccionar fecha final")
+                
+                      
+                    
+            with gr.Row():
+                submit_button = gr.Button(value="Procesar")
+                clear_button = gr.Button(value="Limpiar") 
+            with gr.Row():
+                output_plots = gr.File(label="Descargar gráficas")
+                output_geometry = gr.File(label="Descargar geometría")
+                map_view = gr.HTML(label="Mapa", elem_id="output-map", value=initial_map._repr_html_(), visible=True)
+
+            def clear_inputs():
+                """
+                Resetea todos los campos del formulario a sus valores iniciales.
+                """
+                return (
+                    gr.update(value=None),
+                    gr.update(value=None),  
+                    gr.update(value=None),  
+                    gr.update(value=""),    
+                    gr.update(value=""),    
+                    gr.update(value=""),    
+                    gr.update(value=None),  
+                    gr.update(value=None),  
+                    gr.update(value=None),  
+                )
+
+            clear_button.click(
+                fn=clear_inputs,
+                inputs=[],
+                outputs=[
+                    indexes,              
+                    input_file_type,        
+                    geometry_file,         
+                    latitude_column,    
+                    longitude_column,       
+                    catastral_registry,    
+                    selected_date_start,          
+                    selected_date_end,          
+                ]
+            )
+            def update_visibility(file_type):
+                if file_type == "Registro Catastral":
+                    return (
+                        gr.update(visible=False),  
+                        gr.update(visible=True),   
+                        gr.update(visible=False),  
+                        gr.update(visible=False)   
+                    )
+                elif file_type == "CSV":
+                    return (
+                        gr.update(visible=True),   
+                        gr.update(visible=False), 
+                        gr.update(visible=True),   
+                        gr.update(visible=True)    
+                    )
+                else:
+                    return (
+                        gr.update(visible=True),   
+                        gr.update(visible=False),  
+                        gr.update(visible=False), 
+                        gr.update(visible=False)  
+                    )
+
+            def process_inputs(input_file_type, geometry_file, catastral_registry, indexes, selected_date_start, selected_date_end, latitude_column, longitude_column):
+                if input_file_type == "Registro Catastral":
+                    return process_catastral_data_sentinel(catastral_registry,indexes, selected_date_start, selected_date_end)
+                elif input_file_type == "Shapefile":
+                    return process_shp_data_sentinel(geometry_file, indexes, selected_date_start, selected_date_end)
+                elif input_file_type == "CSV":
+                    return process_csv_data_sentinel(geometry_file, indexes, selected_date_start, selected_date_end, latitude_column, longitude_column)
+                else:
+                    return process_geojson_data_sentinel(geometry_file, indexes, selected_date_start, selected_date_end)
+
+            input_file_type.change(
+                fn=update_visibility,
+                inputs=[input_file_type],
+                outputs=[geometry_file, catastral_registry, latitude_column, longitude_column]
+            )
+
+            submit_button.click(
+                fn=process_inputs,
+                inputs=[input_file_type, geometry_file, catastral_registry, indexes, selected_date_start, selected_date_end, latitude_column, longitude_column],
+                outputs=[output_plots,output_geometry, map_view]
+            )
+    
     return interface
 
 io = build_interface()

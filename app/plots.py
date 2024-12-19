@@ -80,7 +80,7 @@ def plot_statistics(statistics, plot_type, poligon):
 
     Args:
         statistics (pd.DataFrame): DataFrame containing statistical data (mean and standard deviation) by month and year.
-        plot_types (list[str]): List of plot types to generate (options: "month", "total", "monthly").
+        plot_types (list[str]): List of plot types to generate (options: "month", "zonal", "monthly").
         polygon (str): Identifier for the polygon being analyzed.
 
     Returns:
@@ -115,7 +115,8 @@ def plot_statistics(statistics, plot_type, poligon):
                     fig_medi.add_trace(go.Scatter(x=years_mes, y=np.array(mes_means) - np.array(mes_std),
                                                   mode='lines', name=f"{months_dict[mes]} (mean - std)", line=dict(dash='dash')))
 
-            elif grafica == "total":
+            elif grafica == "zonal":
+                print(df_filtered)
                 years = df_filtered["anio"].tolist()
                 months = df_filtered["mes"].tolist()
                 means = df_filtered["mediana"].tolist()
@@ -133,7 +134,7 @@ def plot_statistics(statistics, plot_type, poligon):
                 monthly_std = df_filtered.groupby("mes")["desviacion"].mean()  
 
                 fig_medi.add_trace(go.Scatter(x=[months_dict[m] for m in monthly_mean.index], y=monthly_mean.values,
-                                              mode='lines+markers', name="Median by Month", marker=dict(color='blue')))
+                                              mode='lines+markers', name="Mediana por mes", marker=dict(color='blue')))
                 fig_medi.add_trace(go.Scatter(x=[months_dict[m] for m in monthly_mean.index], y=(monthly_mean + monthly_std.fillna(0)).values,
                                               mode='lines', name="Median + STD", line=dict(dash='dash')))
                 fig_medi.add_trace(go.Scatter(x=[months_dict[m] for m in monthly_mean.index], y=(monthly_mean - monthly_std.fillna(0)).values,
@@ -146,7 +147,7 @@ def plot_statistics(statistics, plot_type, poligon):
                 hovermode="x unified"
             )
 
-            html_filename = os.path.join(output_dir, f"plot_{index}_{grafica}_{poligon}.html")
+            html_filename = os.path.join(output_dir, f"Estadística_{grafica}_{index}_{poligon}.html")
             pio.write_html(fig_medi, html_filename)
             archivos_html.append(html_filename)
 

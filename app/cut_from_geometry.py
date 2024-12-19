@@ -57,11 +57,8 @@ def cut_from_geometry(gdf_parcela, format, image_paths):
             gdf_parcela = gpd.GeoDataFrame(geometry=[parcela_geometry], crs=parcela_crs)
 
         cropped_images = []
-        valid_files = [f for f in image_paths if f.endswith(f'.{format}')]
-        if not valid_files:
-            raise FileNotFoundError(f"No files found with the .{format} format.")
 
-        for image_path in valid_files:
+        for image_path in image_paths:
             original_filename = os.path.basename(image_path)
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
             with rasterio.open(image_path) as src:
@@ -73,7 +70,7 @@ def cut_from_geometry(gdf_parcela, format, image_paths):
                 geometries = [gdf_parcela.geometry.iloc[0]]
                 out_image, out_transform = mask(src, geometries, crop=True)
                 extension = format.lower()
-                filename = original_filename.replace('.tif', f' .{extension}').replace('.jp2', f' .{extension}')
+                filename = original_filename.replace('.tif', f'.{extension}').replace('.jp2', f'.{extension}')
                 temp_file = os.path.join(tempfile.gettempdir(), filename)
 
                 save_raster(out_image, temp_file, src, out_transform, format)
